@@ -16,23 +16,29 @@
 
 get_noun_table <- function (english_noun, greek_noun, add_vocative = FALSE) {
 
+  # Extract data from the noun table
+
   wiktionary_url <- paste0("https://el.wiktionary.org/wiki/", greek_noun)
 
-  greek_html <- read_html(wiktionary_url)
-
-  wiktionary_text_raw <- html_text(greek_html)
-
-  cases <- c("nominative", "genitive", "accusative", "vocative")
-  cases_reordered <- c("nominative", "accusative", "genitive", "vocative")
-
-  declension_raw_tbl <- html_elements(greek_html, "table") |>
+  declension_raw_tbl <- wiktionary_url |>
+    read_html() |>
+    html_elements("table") |>
     html_table() |>
     extract2(1) |>
     clean_names()
 
+  # Defines the cases. Reordered to match the order on anki
+
+  cases <- c("nominative", "genitive", "accusative", "vocative")
+  cases_reordered <- c("nominative", "accusative", "genitive", "vocative")
+
+  # Figures out the noun gender, a feature of Greek
+
   genders <- c("m" = "ο","f" =  "η","n" = "το")
   gender <- unlist(declension_raw_tbl[1, "enikos"])
   gender <- names(genders)[genders == gender]
+
+  # Build the declension table
 
   declension_tbl <- tibble(case = c(cases, cases),
                            number = rep(c("singular", "plural"), each = 4),
@@ -43,12 +49,17 @@ get_noun_table <- function (english_noun, greek_noun, add_vocative = FALSE) {
     arrange(case, desc(number)) |>
     pivot_wider(names_from = c(case, number), values_from = noun)
 
+  # Usually the vocative doesnt make much sense to learn or is the same as
+  # another case but sometimes it is useful
+
   if (add_vocative == FALSE) {
 
     declension_tbl$vocative_singular <- ""
     declension_tbl$vocative_plural <- ""
 
   }
+
+  # Reformats into a good format for upload to anki
 
   declension_tbl <- tibble(gender, english_noun, noun_image = "") |>
     bind_cols(declension_tbl)
