@@ -17,49 +17,41 @@
 
 get_noun_table <- function (english_noun, greek_noun, add_vocative = FALSE) {
 
-  # Extract data from the noun table
+  # Find the noun table
 
-  wiktionary_url <- paste0("https://el.wiktionary.org/wiki/", greek_noun)
-  wiktionary_html <- read_html(wiktionary_url)
-  wiktionary_tables <- wiktionary_html |> html_elements("table") |> html_table()
+  wiktionary_tables <- .download_tables(greek_noun)
+  table_num <- .find_noun_table(wiktionary_tables)
 
-  # This will figure out which table is the declension one. When it does it
-  # will break. Then i will be the position of the table and we use it later
-  # to extract the correct table.
+  if (table_num <= length(wiktionary_tables)) {
 
-  table_num <- .find_declension_table(wiktionary_tables)
-
-  if (table_num > length(wiktionary_tables)) {
-
-    table_format <- "indeclinable"
+    noun_table_raw <- wiktionary_tables[[table_num]] |> clean_names()
+    table_format <- .find_table_format(noun_table_raw)
 
   } else {
 
-    declension_raw_tbl <- wiktionary_tables |> pluck(table_num) |> clean_names()
-
-    # Figure out if table is standard, multi_gender or unknown
-
-    standard_cols <- c("ptoseis", "enikos", "enikos_2", "plethyntikos",
-                       "plethyntikos_2")
-
-    multi_cols <- c("ptoseis", "enikos", "enikos_2", "enikos_3", "enikos_4",
-                    "enikos_5", "enikos_6")
+    table_format <- "indeclinable"
 
   }
 
+
   if (table_format == "standard") {
+
+    noun_table <- .format_standard(noun_table_raw, english_word, greek_word)
 
   } else if (table_format == "indeclinable") {
 
-    declension_tbl <- .format_indeclinable(english_word, greek_word)
+    noun_table <- .format_indeclinable(noun_table_raw, english_word,
+                                           greek_word)
 
   } else if (table_format == "multi_gender") {
+
+    noun_table <- .format_multi_gender(noun_table_raw, english_word,
+                                           greek_word)
 
   }  else {
 
     warning(paste0("Unknown format: ", english_word, ", ", greek_noun))
-
-    declension_tbl <- .format_unknown(english_noun, greek_noun)
+    noun_table <- .format_unknown(noun_table_raw, english_noun, greek_noun)
 
   }
 
@@ -68,18 +60,33 @@ get_noun_table <- function (english_noun, greek_noun, add_vocative = FALSE) {
 
   if (add_vocative == FALSE) {
 
-    declension_tbl$vocative_singular <- ""
-    declension_tbl$vocative_plural <- ""
+    noun_table$vocative_singular <- ""
+    noun_table$vocative_plural <- ""
 
   }
 
   # Reformats into a good format for upload to anki
 
-  return(declension_tbl)
+  return(noun_table)
 
 }
 
-.find_declension_table <- function (wiktionary_tables) {
+
+.download_tables <- function (greek_noun) {
+
+  wiktionary_url <- paste0("https://el.wiktionary.org/wiki/", greek_noun)
+  wiktionary_html <- read_html(wiktionary_url)
+  wiktionary_tables <- wiktionary_html |> html_elements("table") |> html_table()
+
+  return(wiktionary_tables)
+
+}
+
+
+
+
+
+.find_noun_table <- function (wiktionary_tables) {
 
   num_tables <- length(wiktionary_tables)
   match_col_name <- "ενικός"
@@ -102,8 +109,34 @@ get_noun_table <- function (english_noun, greek_noun, add_vocative = FALSE) {
 
 }
 
+.find_table_format <- function () {
 
-.format_standard <- function (x) {
+  if (table_num > length(wiktionary_tables)) {
+
+    table_format <- "indeclinable"
+
+  } else {
+
+    noun_table_raw <- wiktionary_tables |> pluck(table_num) |> clean_names()
+
+    # Figure out if table is standard, multi_gender or unknown
+
+    standard_cols <- c("ptoseis", "enikos", "enikos_2", "plethyntikos",
+                       "plethyntikos_2")
+
+    multi_cols <- c("ptoseis", "enikos", "enikos_2", "enikos_3", "enikos_4",
+                    "enikos_5", "enikos_6")
+
+  }
+
+
+
+
+}
+
+
+
+.format_standard <- function (noun_table_raw, english_noun, greek_noun) {
 
   # Defines the cases. Reordered to match the order on anki
 
@@ -113,24 +146,29 @@ get_noun_table <- function (english_noun, greek_noun, add_vocative = FALSE) {
   # Figures out the noun gender, a feature of Greek
 
   genders <- c("m" = "ο","f" = "η","n" = "το")
-  gender <- unlist(x[1, "enikos"])
+  gender <- unlist(noun_table_raw[1, "enikos"])
   gender <- names(genders)[genders == gender]
 
   # Build the declension table
 
-  declension_tbl <- tibble(case = c(cases, cases),
-                           number = rep(c("singular", "plural"), each = 4),
-                           noun = c(x$enikos_2[1:4],
-                                    x$plethyntikos_2[1:4])) |>
+  case <- c(cases, cases)
+  number <- rep(c("singular", "plural"), each = 4)
+  noun <- c(noun_table_raw$enikos_2[1:4], noun_table_raw$plethyntikos_2[1:4])
+
+  noun_table <- tibble(case, number, noun) |>
+
+    # By setting case as a factor we can use the levels to reorder in the
+    # desired way
+
     mutate(noun = str_replace_all(noun, "[:punct:]", ""),
            case = factor(case, levels = cases_reordered)) |>
     arrange(case, desc(number)) |>
     pivot_wider(names_from = c(case, number), values_from = noun)
 
-  declension_tbl <- tibble(gender, english_noun, noun_image = "") |>
-    bind_cols(declension_tbl)
+  noun_table <- tibble(gender, english_noun, noun_image = "") |>
+    bind_cols(noun_table)
 
-  return(declension_tbl)
+  return(noun_table)
 
 }
 
@@ -167,10 +205,23 @@ get_noun_table <- function (english_noun, greek_noun, add_vocative = FALSE) {
 
 }
 
-.format_missing_genitive_plural <- function (x) {
+.test_format_noun <- function (english_noun, greek_noun, f) {
 
+  wiktionary_tables <- .download_tables(greek_noun)
+  table_num <- .find_noun_table(wiktionary_tables)
+
+  if (table_num > length(wiktionary_tables)) {
+
+    noun_table <- f(english_noun, greek_noun)
+
+  } else {
+
+    noun_table_raw <- clean_names(wiktionary_tables[[table_num]])
+    noun_table <- f(noun_table_raw, english_noun, greek_noun)
+
+  }
+
+  return(noun_table)
 
 }
-
-
 
