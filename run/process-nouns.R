@@ -22,11 +22,15 @@ nouns_table <- vector("list", length = nrow(nouns_to_do))
 ## To Do - need to adapt the code to take account of nouns which have multiple
 ## genders
 
-get_noun_table_safely <- safely(get_noun_table)
+get_noun_table_safe <- safely(get_noun_table)
 
 nouns_table <- map2(nouns_to_do$english_noun,
                     nouns_to_do$greek_noun,
-                    get_noun_table_safely)
+                    get_noun_table_safe)
+
+results <- map_dfr(nouns_table, "result")
+
+results <- map(nouns_table, "error")
 
 
 for (i in 1:nrow(nouns_to_do)) {

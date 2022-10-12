@@ -15,43 +15,39 @@
 #' need to learn all the declensions.
 #' @export
 
-get_noun_table <- function (english_noun, greek_noun, add_vocative = FALSE) {
+get_noun_table <- function (english_noun, greek_noun, add_vocative = FALSE,
+                            drop_neutral = TRUE, pause = 0.25) {
 
   # Find the noun table
 
   wiktionary_tables <- .download_tables(greek_noun)
-  table_num <- .find_noun_table(wiktionary_tables)
+  table_num <- .find_noun_table_num(wiktionary_tables)
+  table_format <- .find_noun_table_format(wiktionary_tables, table_num)
 
-  if (table_num <= length(wiktionary_tables)) {
+  if (table_format == "indeclinable") {
 
-    noun_table_raw <- wiktionary_tables[[table_num]] |> clean_names()
-    table_format <- .find_table_format(noun_table_raw)
+    noun_table <- .format_indeclinable(english_noun, greek_noun)
 
   } else {
 
-    table_format <- "indeclinable"
+    noun_table_raw <- wiktionary_tables[[table_num]] |> clean_names()
 
-  }
+    if (table_format == "standard") {
+
+      noun_table <- .format_standard(noun_table_raw, english_noun, greek_noun)
 
 
-  if (table_format == "standard") {
+    } else if (table_format == "multi_gender") {
 
-    noun_table <- .format_standard(noun_table_raw, english_word, greek_word)
+      noun_table <- .format_multi_gender(noun_table_raw, english_noun,
+                                         greek_noun, drop_neutral)
 
-  } else if (table_format == "indeclinable") {
+    }  else {
 
-    noun_table <- .format_indeclinable(noun_table_raw, english_word,
-                                           greek_word)
+      warning(paste0("Unknown format: ", english_noun, ", ", greek_noun))
+      noun_table <- .format_indeclinable(english_noun, greek_noun)
 
-  } else if (table_format == "multi_gender") {
-
-    noun_table <- .format_multi_gender(noun_table_raw, english_word,
-                                           greek_word)
-
-  }  else {
-
-    warning(paste0("Unknown format: ", english_word, ", ", greek_noun))
-    noun_table <- .format_unknown(noun_table_raw, english_noun, greek_noun)
+    }
 
   }
 
@@ -65,12 +61,13 @@ get_noun_table <- function (english_noun, greek_noun, add_vocative = FALSE) {
 
   }
 
+  #noun_table <- mutate(noun_table, table_format, .before = english_noun)
+
   # Reformats into a good format for upload to anki
 
   return(noun_table)
 
 }
-
 
 .download_tables <- function (greek_noun) {
 
@@ -82,11 +79,7 @@ get_noun_table <- function (english_noun, greek_noun, add_vocative = FALSE) {
 
 }
 
-
-
-
-
-.find_noun_table <- function (wiktionary_tables) {
+.find_noun_table_num <- function (wiktionary_tables) {
 
   num_tables <- length(wiktionary_tables)
   match_col_name <- "ενικός"
@@ -109,11 +102,11 @@ get_noun_table <- function (english_noun, greek_noun, add_vocative = FALSE) {
 
 }
 
-.find_table_format <- function () {
+.find_noun_table_format <- function (wiktionary_tables, table_num) {
 
   if (table_num > length(wiktionary_tables)) {
 
-    table_format <- "indeclinable"
+    return ("indeclinable")
 
   } else {
 
@@ -124,24 +117,45 @@ get_noun_table <- function (english_noun, greek_noun, add_vocative = FALSE) {
     standard_cols <- c("ptoseis", "enikos", "enikos_2", "plethyntikos",
                        "plethyntikos_2")
 
-    multi_cols <- c("ptoseis", "enikos", "enikos_2", "enikos_3", "enikos_4",
-                    "enikos_5", "enikos_6")
+    multi_gender_cols <- c("ptoseis", "enikos", "enikos_2", "enikos_3", "enikos_4",
+                           "enikos_5", "enikos_6")
+
+    col_names <- colnames(noun_table_raw)
+
+    if (identical(standard_cols, col_names)) {
+
+      return ("standard")
+
+    } else if (identical(multi_gender_cols, col_names)) {
+
+      return ("multi_gender")
+
+    }
 
   }
 
+  return ("unknown")
 
+}
 
+.clean_noun <- function (x, elements = NA) {
+
+  if (is.na(elements)[1]) {
+
+    elements <- 1:length(x)
+
+  }
+
+  noun <- x |>
+    magrittr::extract(elements) |>
+    str_replace_all("[:punct:]", "")
+
+  return(noun)
 
 }
 
 
-
 .format_standard <- function (noun_table_raw, english_noun, greek_noun) {
-
-  # Defines the cases. Reordered to match the order on anki
-
-  cases <- c("nominative", "genitive", "accusative", "vocative")
-  cases_reordered <- c("nominative", "accusative", "genitive", "vocative")
 
   # Figures out the noun gender, a feature of Greek
 
@@ -151,17 +165,18 @@ get_noun_table <- function (english_noun, greek_noun, add_vocative = FALSE) {
 
   # Build the declension table
 
-  case <- c(cases, cases)
   number <- rep(c("singular", "plural"), each = 4)
-  noun <- c(noun_table_raw$enikos_2[1:4], noun_table_raw$plethyntikos_2[1:4])
+
+  # By setting case as a factor we can use the levels to reorder in the
+  # desired way
+
+  case <- factor(rep(c("nominative", "genitive", "accusative", "vocative"), 2),
+                 levels = c("nominative", "accusative", "genitive", "vocative"))
+
+  noun <- c(noun_table_raw$enikos_2[1:4], noun_table_raw$plethyntikos_2[1:4]) |>
+    .clean_noun()
 
   noun_table <- tibble(case, number, noun) |>
-
-    # By setting case as a factor we can use the levels to reorder in the
-    # desired way
-
-    mutate(noun = str_replace_all(noun, "[:punct:]", ""),
-           case = factor(case, levels = cases_reordered)) |>
     arrange(case, desc(number)) |>
     pivot_wider(names_from = c(case, number), values_from = noun)
 
@@ -172,9 +187,55 @@ get_noun_table <- function (english_noun, greek_noun, add_vocative = FALSE) {
 
 }
 
-.format_multi_gender <- function (raw_tbl) {
+.format_multi_gender <- function (noun_table_raw, english_noun, greek_noun,
+                                  drop_neutral = TRUE) {
+
+  # Defines the cases. Reordered to match the order on anki
+
+  cases <- c("nominative", "genitive", "accusative", "vocative")
+  cases_reordered <- c("nominative", "accusative", "genitive", "vocative")
+
+  elements <- c(2:5, 8:11)
+
+  masc_nouns <- .clean_noun(noun_table_raw$enikos_2, elements)
+  femm_nouns <- .clean_noun(noun_table_raw$enikos_4, elements)
+  femm_article <- noun_table_raw$enikos_3[elements]
+
+  if (drop_neutral == TRUE) {
+
+    noun <- paste(masc_nouns, "/", femm_article, femm_nouns)
+
+  } else {
+
+    neut_nouns <- .clean_noun(noun_table_raw$enikos_6, elements)
+    neut_article <- noun_table_raw$enikos_5[elements]
+
+    noun <-  paste(masc_nouns, "/", femm_article, femm_nouns, "/", neut_article,
+                   neut_nouns)
+
+  }
+
+  number <- rep(c("singular", "plural"), each = 4)
+
+  # By setting case as a factor we can use the levels to reorder in the
+  # desired way
+
+  case <- factor(rep(c("nominative", "genitive", "accusative", "vocative"), 2),
+                 levels = c("nominative", "accusative", "genitive", "vocative"))
+
+
+  noun_table <- tibble(case, number, noun) |>
+    arrange(case, desc(number)) |>
+    pivot_wider(names_from = c(case, number), values_from = noun)
+
+  noun_table <- tibble(gender = "m", english_noun, noun_image = "") |>
+    bind_cols(noun_table)
+
+  return(noun_table)
 
 }
+
+
 
 
 #' Format indeclinable (Helper)
@@ -208,7 +269,7 @@ get_noun_table <- function (english_noun, greek_noun, add_vocative = FALSE) {
 .test_format_noun <- function (english_noun, greek_noun, f) {
 
   wiktionary_tables <- .download_tables(greek_noun)
-  table_num <- .find_noun_table(wiktionary_tables)
+  table_num <- .find_noun_table_num(wiktionary_tables)
 
   if (table_num > length(wiktionary_tables)) {
 
