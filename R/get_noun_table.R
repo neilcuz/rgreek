@@ -16,7 +16,7 @@
 #' @export
 
 get_noun_table <- function (english_noun, greek_noun, add_vocative = FALSE,
-                            drop_neutral = TRUE, pause = 0.25) {
+                            pause = 0.25) {
 
   # Find the noun table
 
@@ -35,12 +35,6 @@ get_noun_table <- function (english_noun, greek_noun, add_vocative = FALSE,
     if (table_format == "standard") {
 
       noun_table <- .format_standard(noun_table_raw, english_noun, greek_noun)
-
-
-    } else if (table_format == "multi_gender") {
-
-      noun_table <- .format_multi_gender(noun_table_raw, english_noun,
-                                         greek_noun, drop_neutral)
 
     }  else {
 
@@ -65,6 +59,8 @@ get_noun_table <- function (english_noun, greek_noun, add_vocative = FALSE,
 
   # Reformats into a good format for upload to anki
 
+  Sys.sleep(pause)
+
   return(noun_table)
 
 }
@@ -82,7 +78,11 @@ get_noun_table <- function (english_noun, greek_noun, add_vocative = FALSE,
 .find_noun_table_num <- function (wiktionary_tables) {
 
   num_tables <- length(wiktionary_tables)
-  match_col_name <- "ενικός"
+
+  # This mean plural in Greek. Noun declension tables will have this word in
+  # their column names.
+
+  match_col_name <- "πληθυντικός"
 
   for (i in 1:num_tables) {
 
@@ -138,28 +138,44 @@ get_noun_table <- function (english_noun, greek_noun, add_vocative = FALSE,
 
 }
 
-.clean_noun <- function (x, elements = NA) {
+.clean_noun <- function (x, doubles = NA) {
 
-  if (is.na(elements)[1]) {
+  basic_word <- x[1]
 
-    elements <- 1:length(x)
+  x <- x |>
+    str_replace_all("[:punct:]", "") |>
+    str_split(pattern = "\\s") |>
+    map_chr(1)
+
+  if (!is.na(doubles[1])) {
+
+    x_doubles <- x[doubles]
+
+    root <- str_sub(basic_word, 1, 3)
+
+    root_start_positions <- x_doubles |> str_locate_all(root) |> pluck(1)
+
+    if (nrow(root_start_positions) != 2) {
+
+      warning (paste0("problem with ", basic_word))
+
+      return (x)
+
+    }
+
+    x[doubles] <- str_sub(x_doubles, 1, root_start_positions[2, 1] - 1)
 
   }
 
-  noun <- x |>
-    magrittr::extract(elements) |>
-    str_replace_all("[:punct:]", "")
-
-  return(noun)
+  return (x)
 
 }
-
 
 .format_standard <- function (noun_table_raw, english_noun, greek_noun) {
 
   # Figures out the noun gender, a feature of Greek
 
-  genders <- c("m" = "ο","f" = "η","n" = "το")
+  genders <- c("m" = "ο","f" = "η","n" = "το", "mf" ="ο/η")
   gender <- unlist(noun_table_raw[1, "enikos"])
   gender <- names(genders)[genders == gender]
 
@@ -173,12 +189,31 @@ get_noun_table <- function (english_noun, greek_noun, add_vocative = FALSE,
   case <- factor(rep(c("nominative", "genitive", "accusative", "vocative"), 2),
                  levels = c("nominative", "accusative", "genitive", "vocative"))
 
-  noun <- c(noun_table_raw$enikos_2[1:4], noun_table_raw$plethyntikos_2[1:4]) |>
-    .clean_noun()
+  # In some tables the entries are written over 2 lines. These get condensed
+  # into a single cell with no space between them e.g. συγγραφέας
+  # Need to identify these and remove the extra word.
 
-  noun_table <- tibble(case, number, noun) |>
-    arrange(case, desc(number)) |>
-    pivot_wider(names_from = c(case, number), values_from = noun)
+  singular_doubles <- str_detect(noun_table_raw$enikos, "τουτου")
+  plural_doubles <- rep(FALSE, 4) # for now related to the doubles
+
+  noun_raw <- c(noun_table_raw$enikos_2[1:4],
+                noun_table_raw$plethyntikos_2[1:4])
+
+  doubles <- c(singular_doubles, plural_doubles)
+
+  noun <- .clean_noun(noun_raw, doubles)
+
+  noun_table <- tibble(case, number, noun) |> arrange(case, desc(number))
+
+
+  if (gender == "mf") {
+
+    noun_table <- mutate(noun_table, noun = paste0(noun, " / η ", noun))
+
+  }
+
+  noun_table <- pivot_wider(noun_table, names_from = c(case, number),
+                            values_from = noun)
 
   noun_table <- tibble(gender, english_noun, noun_image = "") |>
     bind_cols(noun_table)
@@ -187,53 +222,53 @@ get_noun_table <- function (english_noun, greek_noun, add_vocative = FALSE,
 
 }
 
-.format_multi_gender <- function (noun_table_raw, english_noun, greek_noun,
-                                  drop_neutral = TRUE) {
-
-  # Defines the cases. Reordered to match the order on anki
-
-  cases <- c("nominative", "genitive", "accusative", "vocative")
-  cases_reordered <- c("nominative", "accusative", "genitive", "vocative")
-
-  elements <- c(2:5, 8:11)
-
-  masc_nouns <- .clean_noun(noun_table_raw$enikos_2, elements)
-  femm_nouns <- .clean_noun(noun_table_raw$enikos_4, elements)
-  femm_article <- noun_table_raw$enikos_3[elements]
-
-  if (drop_neutral == TRUE) {
-
-    noun <- paste(masc_nouns, "/", femm_article, femm_nouns)
-
-  } else {
-
-    neut_nouns <- .clean_noun(noun_table_raw$enikos_6, elements)
-    neut_article <- noun_table_raw$enikos_5[elements]
-
-    noun <-  paste(masc_nouns, "/", femm_article, femm_nouns, "/", neut_article,
-                   neut_nouns)
-
-  }
-
-  number <- rep(c("singular", "plural"), each = 4)
-
-  # By setting case as a factor we can use the levels to reorder in the
-  # desired way
-
-  case <- factor(rep(c("nominative", "genitive", "accusative", "vocative"), 2),
-                 levels = c("nominative", "accusative", "genitive", "vocative"))
-
-
-  noun_table <- tibble(case, number, noun) |>
-    arrange(case, desc(number)) |>
-    pivot_wider(names_from = c(case, number), values_from = noun)
-
-  noun_table <- tibble(gender = "m", english_noun, noun_image = "") |>
-    bind_cols(noun_table)
-
-  return(noun_table)
-
-}
+# .format_multi_gender <- function (noun_table_raw, english_noun, greek_noun,
+#                                   drop_neutral = TRUE) {
+#
+#   # Defines the cases. Reordered to match the order on anki
+#
+#   cases <- c("nominative", "genitive", "accusative", "vocative")
+#   cases_reordered <- c("nominative", "accusative", "genitive", "vocative")
+#
+#   elements <- c(2:5, 8:11)
+#
+#   masc_nouns <- .clean_noun(noun_table_raw$enikos_2, elements)
+#   femm_nouns <- .clean_noun(noun_table_raw$enikos_4, elements)
+#   femm_article <- noun_table_raw$enikos_3[elements]
+#
+#   if (drop_neutral == TRUE) {
+#
+#     noun <- paste(masc_nouns, "/", femm_article, femm_nouns)
+#
+#   } else {
+#
+#     neut_nouns <- .clean_noun(noun_table_raw$enikos_6, elements)
+#     neut_article <- noun_table_raw$enikos_5[elements]
+#
+#     noun <-  paste(masc_nouns, "/", femm_article, femm_nouns, "/", neut_article,
+#                    neut_nouns)
+#
+#   }
+#
+#   number <- rep(c("singular", "plural"), each = 4)
+#
+#   # By setting case as a factor we can use the levels to reorder in the
+#   # desired way
+#
+#   case <- factor(rep(c("nominative", "genitive", "accusative", "vocative"), 2),
+#                  levels = c("nominative", "accusative", "genitive", "vocative"))
+#
+#
+#   noun_table <- tibble(case, number, noun) |>
+#     arrange(case, desc(number)) |>
+#     pivot_wider(names_from = c(case, number), values_from = noun)
+#
+#   noun_table <- tibble(gender = "m", english_noun, noun_image = "") |>
+#     bind_cols(noun_table)
+#
+#   return(noun_table)
+#
+# }
 
 
 
