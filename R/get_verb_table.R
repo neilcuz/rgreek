@@ -1,5 +1,5 @@
 
-get_verb_table <- function (english_verb, greek_verb) {
+get_verb_table <- function (english_verb, greek_verb, english_verb_tenses) {
 
   wiktionary_url <- paste0("https://el.wiktionary.org/wiki/", greek_verb)
 
@@ -32,7 +32,11 @@ get_verb_table <- function (english_verb, greek_verb) {
     t() |>
     set_colnames(c("I", "you", "he/she/it", "we", "yous", "they")) |>
     as_tibble() |>
-    mutate(across(.fns = clean_verb))
+    mutate(across(.fns = clean_verb)) |>
+    mutate(tense = c("present", "past", "future", "past cont", "future cont",
+                     "past perfect", "present perfect", "future perfect"),
+           english_verb = c(english_verb, english_verb_tenses),
+           .before = I)
 
   return(declension_tbl)
 

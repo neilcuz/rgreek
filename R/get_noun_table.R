@@ -151,6 +151,8 @@ get_noun_table <- function (english_noun, greek_noun, add_vocative = FALSE,
 
     x_doubles <- x[doubles]
 
+    if (length(x_doubles) == 0) return (x)
+
     root <- str_sub(basic_word, 1, 3)
 
     root_start_positions <- x_doubles |> str_locate_all(root) |> pluck(1)

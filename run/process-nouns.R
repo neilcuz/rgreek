@@ -18,11 +18,11 @@ nouns_to_do <- read_excel("~/OneDrive/Greek/greek_to_do.xlsx", sheet = "nouns")
 ## To Do - need to adapt the code to take account of nouns which have multiple
 ## genders
 
-nouns_table <- map2(nouns_to_do$english_noun,
-                    nouns_to_do$greek_noun,
-                    safely(get_noun_table))
+nouns_table <- map2_dfr(nouns_to_do$english_noun,
+                        nouns_to_do$greek_noun,
+                        possibly(get_noun_table, otherwise = NULL))
 
-closeAllConnections()
+suppressWarnings(closeAllConnections())
 
 # Split the nouns by gender because Anki cards are split by gender
 
