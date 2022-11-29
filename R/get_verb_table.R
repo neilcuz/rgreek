@@ -36,6 +36,7 @@ get_verb_table <- function (english_verb, greek_verb, english_verb_tenses) {
     mutate(tense = c("present", "past", "future", "past cont", "future cont",
                      "past perfect", "present perfect", "future perfect"),
            english_verb = c(english_verb, english_verb_tenses),
+           image = "",
            .before = I)
 
   return(declension_tbl)
